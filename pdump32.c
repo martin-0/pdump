@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
         return 0;
 }
 
-// requries child to be stopped just before its execve()
+// requires child to be stopped just before its execve()
 long get_to_ldentry(struct user_regs_struct* regs, pid_t pid, int* status) {
 	long addr_ld_entry = 0;
 	int intosys = 0;
