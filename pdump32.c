@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
 
 	// trace until the brk() syscall instruction
 	if ((trace_until(&regs, addr_ld_brk_in, pid, &status)) != 0) {
-		fprintf (stderr, "+pdump: oops: neither trace_until() nor assert_status() didn't catch the condition..\n");
+		fprintf (stderr, "+pdump: oops: neither trace_until() nor assert_status() caught the condition..\n");
 		PTRACE_DETACH(pid)
 		exit(1);
 	}
