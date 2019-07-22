@@ -10,7 +10,7 @@
 #define	PTRACE_GETREGS(pid, regs)					\
 	do {								\
 		if (ptrace(PTRACE_GETREGS, pid , NULL, regs) == -1) {	\
-			perror ("+tracer: oops: PTRACE_GETREGS");	\
+			perror ("+pdump: oops: PTRACE_GETREGS");	\
 			PTRACE_DETACH(pid)				\
 			exit(1);					\
 		}							\
@@ -19,7 +19,7 @@
 #define	PTRACE_SETREGS(pid, regs)					\
 	do {								\
 		if (ptrace(PTRACE_SETREGS, pid , NULL, regs) == -1) {	\
-			perror ("+tracer: oops: PTRACE_SETREGS");	\
+			perror ("+pdump: oops: PTRACE_SETREGS");	\
 			PTRACE_DETACH(pid)				\
 			exit(1);					\
 		}							\
@@ -28,7 +28,7 @@
 #define	PTRACE_SYSCALL(pid) 						\
 	do {								\
 		if (ptrace(PTRACE_SYSCALL, pid, 0,0) == -1) {		\
-			perror("+tracer: oops: PTRACE_SYSCALL");	\
+			perror("+pdump: oops: PTRACE_SYSCALL");	\
 			PTRACE_DETACH(pid)				\
 			exit(1);					\
 		}							\
@@ -37,7 +37,7 @@
 #define	PTRACE_SINGLESTEP(pid) 						\
 	do {								\
 		if (ptrace(PTRACE_SINGLESTEP, pid, 0,0) == -1) {	\
-			perror("+tracer: oops: PTRACE_SINGLESTEP");	\
+			perror("+pdump: oops: PTRACE_SINGLESTEP");	\
 			PTRACE_DETACH(pid)				\
 			exit(1);					\
 		}							\
@@ -48,12 +48,13 @@
 #define	PTRACE_DETACH(pid) 						\
 	do {								\
 		if (ptrace(PTRACE_DETACH, pid, 0,0) == -1) {		\
-			perror("+tracer: oops: PTRACE_DETACH");		\
+			perror("+pdump: oops: PTRACE_DETACH");		\
 			exit(1);					\
 		}							\
 	} while(0);						
 
 
+#define	DEFAULT_DUMP_FILE		"dump.out"
 #define	DEFAULT_DUMP_SIZE		0x2000
 #define	DEFAULT_DUMP_FD			1
 

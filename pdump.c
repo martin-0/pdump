@@ -20,6 +20,12 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
+	int dfd;						// dump fd
+	if ( (dfd = open(DEFAULT_DUMP_FILE, O_CREAT|O_TRUNC|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0) {
+		perror("oops: +pdump: failed to open dump file");
+		exit(1);
+	}
+
 	char* ldpath;
 	unsigned long ofst_ld_entry = 0;			// elf entry point in ld.so
 
@@ -84,7 +90,7 @@ int main(int argc, char** argv) {
 	addr_pie_base = regs.rbp & 0xfffffffffffff000;
 	fprintf(stderr,"+pdump: %u: child base: 0x%lx\n", pid, addr_pie_base);
 
-	regs.rdi = 1;
+	regs.rdi = dfd;
 	regs.rsi = addr_pie_base;
 	regs.rdx = DEFAULT_DUMP_SIZE;
 	regs.rax = SYS_write;
@@ -92,6 +98,7 @@ int main(int argc, char** argv) {
 	PTRACE_SETREGS(pid, &regs)
 	PTRACE_DETACH(pid)
 
+	close(dfd);
         return 0;
 }
 
