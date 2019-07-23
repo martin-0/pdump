@@ -1,7 +1,7 @@
 /* (c) 2019 martin */
 
-#ifndef HAVE_TRACER_H
-#define HAVE_TRACER_H
+#ifndef HAVE_PDUMP_H
+#define HAVE_PDUMP_H
 
 #include <stdio.h>
 #include <unistd.h>
@@ -43,8 +43,6 @@
 		}							\
 	} while(0);						
 
-#endif
-
 #define	PTRACE_DETACH(pid) 						\
 	do {								\
 		if (ptrace(PTRACE_DETACH, pid, 0,0) == -1) {		\
@@ -82,3 +80,5 @@ void handle_child(char* tracee);
 
 // dump the contents of handful of registers
 void regdump(struct user_regs_struct* r);
+
+#endif /* ifndef HAVE_PDUMP_H */
