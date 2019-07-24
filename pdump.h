@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/ptrace.h>
+#include <sys/reg.h>
 
 #define	PTRACE_GETREGS(pid, regs)					\
 	do {								\
@@ -52,13 +53,56 @@
 	} while(0);						
 
 
+struct opts_t {
+        char* chldpath;			// path to child to be executed
+        char* ldpath;			// path to ld.so
+        char* dpath;			// path to a dump file
+        size_t dsize;			// how much to dump
+        unsigned long mask;		// preffered mask
+        int reg;			// register that holds .text address before brk()
+	int verbose;			// verbose toggle
+};
+
+struct regentry_t {
+	char* name;
+	int idx;
+}; 
+
+#ifdef __x86_64__
+// let's keep the name different to one defined in sys/reg.h
+enum regidx_t {
+	reg_rax= 0, reg_rbx, reg_rcx, reg_rdx, reg_rsi, reg_rdi, reg_rbp, reg_rsp, reg_r8, reg_r9, reg_r10,
+	reg_r11, reg_r12, reg_r13, reg_r14, reg_r15, reg_rip
+};
+
+struct regentry_t  reg_lookup_tbl[] = {
+	{ "rax", RAX }, { "rbx", RBX }, { "rcx", RCX }, { "rdx", RDX }, { "rsi", RSI },
+	{ "rdi", RDI }, { "rbp", RBP }, { "rsp", RSP }, { "r8", R8 }, { "r9", R9 },
+	{ "r10", R10 }, { "r11", R11 }, { "r12", R12 }, { "r13", R13 }, { "r14", R14 },
+	{ "r15", R14 }, { "rip", RIP }
+};
+
+#define	DEFAULT_LD			"/lib64/ld-linux-x86-64.so.2"
+#define	DEFAULT_BASEREG			( reg_rbp )
+#define	DEFAULT_MASK			0xfffffffffffff000
+
+#else
+enum regidx_t {
+	reg_eax = 0, reg_ebx, reg_ecx, reg_edx, reg_esi, reg_edi, reg_ebp, reg_eip
+};
+
+struct regentry_t  reg_lookup_tbl[] = {
+	{ "eax", EAX }, { "ebx", EBX }, { "ecx", ECX }, { "edx", EDX }, { "esi", ESI },
+	{ "edi", EDI }, { "ebp", EBP }, { "eip", EIP }
+};
+
+#define	DEFAULT_LD			"/lib/ld-linux.so.2"
+#define	DEFAULT_BASEREG			( reg_ebp )
+#define	DEFAULT_MASK			0xfffff000
+#endif
+
 #define	DEFAULT_DUMP_FILE		"dump.out"
 #define	DEFAULT_DUMP_SIZE		0x2000
-#define	DEFAULT_DUMP_FD			1
-
-#define	DEFAULT_LD64			"/lib64/ld-linux-x86-64.so.2"
-#define	DEFAULT_LD32			"/lib/ld-linux.so.2"
-
 
 // get the entry point address from library
 unsigned long get_entry(char* lpath);
@@ -78,7 +122,13 @@ void assert_status(int* status, pid_t pid);
 // prepare the child for the execution after main fork()
 void handle_child(char* tracee);
 
+// parse input arguments 
+int handle_args(struct opts_t* o, int argc, char** argv);
+
 // dump the contents of handful of registers
 void regdump(struct user_regs_struct* r);
+
+// print fancy usage
+void usage();
 
 #endif /* ifndef HAVE_PDUMP_H */

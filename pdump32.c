@@ -1,4 +1,5 @@
-/* (c) 2019 martin */
+/* i386 v0.2 (c) 2019 martin */
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -8,35 +9,41 @@
 #include <sys/user.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <sys/reg.h>
 #include <fcntl.h>
+
+#include <string.h>
+#include <ctype.h>
 
 #include "pdump.h"
 
+void fancy_print(struct opts_t* o);
+
 int main(int argc, char** argv) {
-	if (argc < 2) {
-		fprintf (stderr, "usage: %s /path/to/exe [ /path/to/ld.so ]\n", argv[0]);
-		return -1;
+	struct opts_t opts;
+
+	// set the options first
+	handle_args(&opts, argc, argv);
+
+	if (opts.verbose)
+		fancy_print(&opts);
+
+	// XXX: do we want to use O_TRUNC really ?
+
+	int dfd;						// dump fd
+	if ( (dfd = open(opts.dpath, O_CREAT|O_TRUNC|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0) {
+		fprintf(stderr, "oops: pdump: failed to open dump file %s ", opts.dpath);
+		perror("");
+		exit(1);
 	}
 
-        int dfd;                                                // dump fd
-        if ( (dfd = open(DEFAULT_DUMP_FILE, O_CREAT|O_TRUNC|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0) {
-                perror("oops: +pdump: failed to open dump file");
-                exit(1);
-        }
+	// ld.so entry point
+	unsigned long ofst_ld_entry = get_entry(opts.ldpath);
 
-	char* ldpath;
-	unsigned long ofst_ld_entry = 0;			// elf entry point in ld.so
-
-	// default or user specified
-	ldpath = (argc < 3) ? DEFAULT_LD32 : argv[2];
-
-	ofst_ld_entry = get_entry(ldpath);
-	fprintf (stderr, "+pdump: ld entry point: %lx\n", ofst_ld_entry);
+	fprintf (stderr, "pdump: linker entry point: 0x%lx\n", ofst_ld_entry);
 
 	pid_t pid;
 	if ( (pid=fork()) == 0) {
-		handle_child(argv[1]);
+		handle_child(opts.chldpath);
 	}
 
 	struct user_regs_struct regs;
@@ -56,16 +63,21 @@ int main(int argc, char** argv) {
 
 	ofst_ld_brk_in = regs.eip - 2 - addr_ld_base;		// -2 to compensate for either syscall or int 0x80
 
-	fprintf(stderr, "+pdump: %u: ld base: 0x%.lx, offset brk: %lx\n", pid, addr_ld_base, ofst_ld_brk_in);
+	fprintf(stderr, "+pdump: %u: ld base: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_ld_base, ofst_ld_brk_in);
 
-	// we don't care about this child any more .. make sure to wait for it before forking again..
-	// XXX: maybe better check on status ?
+	// we don't care about the child any more .. kill it.. 
 	PTRACE_DETACH(pid)
 	wait(&status);
 
+	// child should be dead now .. stop if not
+        if ( !WIFEXITED(status) && !WIFSIGNALED(status) ) {
+                fprintf(stderr, "+pdump: oops: %u: child is still alive, aborting.\n", pid);
+                exit(1);
+        }
+
 	// STEP #2:	respawn the child again, stop on syscall/int 0x80 instruction
 	if ( (pid=fork()) == 0) {
-		handle_child(argv[1]);
+		handle_child(opts.chldpath);
 	}
 	
 	unsigned long addr_ld_brk_in = 0;			// actual addr of the brk() in ld.so for current child
@@ -82,22 +94,27 @@ int main(int argc, char** argv) {
 		PTRACE_DETACH(pid)
 		exit(1);
 	}
-	regdump(&regs);
 
-	unsigned long addr_pie_base;
+	unsigned long addr_pie_base = *((unsigned long*)&regs + reg_lookup_tbl[opts.reg].idx ) & opts.mask;
 
-	addr_pie_base = regs.ebp & 0xfffff000;
 	fprintf(stderr,"+pdump: %u: child base: 0x%lx\n", pid, addr_pie_base);
+
+	if (opts.verbose) { 
+		fprintf(stderr, "\n+pdump: %u: registers just before syscall:\n", pid);
+		regdump(&regs);
+	}
 
 	regs.ebx = dfd;
 	regs.ecx = addr_pie_base;
-	regs.edx = DEFAULT_DUMP_SIZE;
+	regs.edx = opts.dsize;
 	regs.eax = SYS_write;
 
 	PTRACE_SETREGS(pid, &regs)
 	PTRACE_DETACH(pid)
 
 	close(dfd);
+
+	printf ("pdump: done.\n");
         return 0;
 }
 
@@ -216,15 +233,16 @@ int trace_until(struct user_regs_struct* regs, unsigned long ip, pid_t pid, int*
 }
 
 void regdump(struct user_regs_struct* r) {
-	fprintf (stderr, "eax\t\t0x%lx\nebx\t\t0x%lx\necx\t\t0x%lx\nedx\t\t0x%lx\n"
-		"esp\t\t0x%lx\nebp\t\t0x%lx\nesi\t\t0x%lx\nedi\t\t0x%lx\neip\t\t0x%lx\n\n",
-			r->eax, r->ebx, r->ecx, r->edx, r->esp, r->ebp, r->esi, r->edi, r->eip);
+	fprintf (stderr,"eax\t\t0x%lx\necx\t\t0x%lx\nedx\t\t0x%lx\nebx\t\t0x%lx\n"
+			"esp\t\t0x%lx\nebp\t\t0x%lx\nesi\t\t0x%lx\nedi\t\t0x%lx\neip\t\t0x%lx\n\n",
+			r->eax, r->ecx, r->edx, r->ebx, r->esp, r->ebp, r->esi, r->edi, r->eip);
 }
 
 unsigned long get_entry(char* lib) {
 	int fd;
 	if ( (fd = open(lib, O_RDONLY)) < 0) {
-		perror("oops: failed to open loader lib");
+		fprintf(stderr, "oops: pdump: failed to open linker %s ", lib);
+		perror("");
 		exit(1);
 	}
 	unsigned long entry;
@@ -233,4 +251,116 @@ unsigned long get_entry(char* lib) {
 	read(fd, &entry, sizeof(entry));
 	close(fd);
 	return entry;
+}
+
+int handle_args(struct opts_t* o, int argc, char** argv) {
+	int i,opt,reg;
+	unsigned long mask;
+
+	// let's set defaults first
+	o->chldpath = NULL;
+	o->ldpath = DEFAULT_LD;
+	o->dpath = DEFAULT_DUMP_FILE;
+	o->dsize = DEFAULT_DUMP_SIZE;
+	o->mask = DEFAULT_MASK;
+	o->reg = DEFAULT_BASEREG;
+	o->verbose = 0;
+
+	while ((opt = getopt(argc, argv, "f:l:d:s:m:r:vh?")) != -1 ) {
+		switch(opt) {
+		case 'f':	o->chldpath = optarg;
+				break;
+
+		case 'l':	o->ldpath = optarg;
+				break;
+
+		case 'd':	o->dpath = optarg;
+				break;
+
+		case 's':	o->dsize = strtoll(optarg, 0, 16);
+				break;
+
+		case 'm':	// set custom mask when figuring out .text base address
+				o->mask = strtoll(optarg, 0, 16);
+				break;
+	
+		case 'r':	// map register name to idx
+				for (i = 0; i < strlen(optarg); i++) {
+					optarg[i] = tolower(optarg[i]);
+				}
+
+				// not exactly an eye candy.. 
+				if (strncmp(optarg, "eax", 3) == 0) {
+					o->reg = reg_eax;
+				}
+				else if ((strncmp(optarg, "ebx", 3) == 0)) {
+					o->reg = reg_ebx;
+				}
+				else if ((strncmp(optarg, "ecx", 3) == 0)) {
+					o->reg = reg_ecx;
+				}
+				else if ((strncmp(optarg, "edx", 3) == 0)) {
+					o->reg = reg_edx;
+				}
+				else if ((strncmp(optarg, "esi", 3) == 0)) {
+					o->reg = reg_esi;
+				}
+				else if ((strncmp(optarg, "edi", 3) == 0)) {
+					o->reg = reg_edi;
+				}
+				else if ((strncmp(optarg, "ebp", 3) == 0)) {
+					o->reg = reg_ebp;
+				}
+				else if ((strncmp(optarg, "eip", 3) == 0)) {
+					o->reg = reg_eip;
+				}
+				else {
+					fprintf(stderr, "pdump: unsupported register %s\n", optarg);
+					usage();
+				}
+				break;
+
+		case 'v':	o->verbose++;
+				break;
+		case 'h':
+		case '?':	
+		default: 	usage();
+				break;
+				
+		}
+	}
+
+	if (!o->chldpath) {
+		fprintf(stderr, "pdump: missing path to an executable\n");
+		usage();
+	}
+
+	return 0;
+}
+
+void fancy_print(struct opts_t* o) {
+	fprintf (stderr, "pdump options:\n"
+			"  tracee:\t%s\n"
+			"  ld.so:\t%s\n"
+			"  dump file:\t%s\n"
+			"  dump size:\t0x%zx\n"
+			"  mask:\t\t0x%lx\n"
+			"  base reg:\t%s\n\n", 
+			o->chldpath, o->ldpath, o->dpath, o->dsize, o->mask, reg_lookup_tbl[o->reg].name );
+}
+
+void usage() {
+	printf(
+		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] [-l /path/to/ld.so] [-r register] [-m mask]\n\n"
+		"\t-f\tBinary to execute.\n\n"
+		"\t-l\tPath to a loader (ld.so).\n\n"
+		"\t-d\tDump the address to a custom file.\n\n"
+		"\t-s\tDump size (in hexadecimal).\n\n"
+		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default address is 0x%x. reg & mask = dump start address.\n\n"
+		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"
+			"\t\tSupported register names: eax, ebx, ecx, edx, esi, edi, ebp, eip\n\n"
+		"\t-v\tToggle verbose mode.\n\n"
+		"\t-? -h\tThis help.\n\n", DEFAULT_MASK);
+
+	exit(1);
 }
