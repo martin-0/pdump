@@ -58,7 +58,7 @@ struct opts_t {
         char* ldpath;			// path to ld.so
         char* dpath;			// path to a dump file
         size_t dsize;			// how much to dump
-        unsigned long mask;		// preffered mask
+        unsigned long mask;		// preferred mask
         int reg;			// register that holds .text address before brk()
 	int verbose;			// verbose toggle
 };
