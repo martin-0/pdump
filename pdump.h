@@ -88,12 +88,12 @@ struct regentry_t  reg_lookup_tbl[] = {
 
 #else
 enum regidx_t {
-	reg_eax = 0, reg_ebx, reg_ecx, reg_edx, reg_esi, reg_edi, reg_ebp, reg_eip
+	reg_eax = 0, reg_ebx, reg_ecx, reg_edx, reg_esi, reg_edi, reg_ebp, reg_esp, reg_eip
 };
 
 struct regentry_t  reg_lookup_tbl[] = {
 	{ "eax", EAX }, { "ebx", EBX }, { "ecx", ECX }, { "edx", EDX }, { "esi", ESI },
-	{ "edi", EDI }, { "ebp", EBP }, { "eip", EIP }
+	{ "edi", EDI }, { "ebp", EBP }, { "esp", UESP}, { "eip", EIP }
 };
 
 #define	DEFAULT_LD			"/lib/ld-linux.so.2"

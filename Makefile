@@ -11,7 +11,7 @@ PDUMP32=pdump32
 ALL: 	prep ${PDUMP} ${PDUMP32} demo
 
 prep:
-	mkdir work
+	mkdir -p work
 
 demo:
 	${MAKE} -C demo

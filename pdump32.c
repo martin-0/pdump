@@ -311,6 +311,9 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 				else if ((strncmp(optarg, "ebp", 3) == 0)) {
 					o->reg = reg_ebp;
 				}
+				else if ((strncmp(optarg, "esp", 3) == 0)) {
+					o->reg = reg_esp;
+				}
 				else if ((strncmp(optarg, "eip", 3) == 0)) {
 					o->reg = reg_eip;
 				}
