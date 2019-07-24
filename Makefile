@@ -6,9 +6,12 @@ OUTDIR=work
 PDUMP=pdump
 PDUMP32=pdump32
 
-.PHONY:	demo
+.PHONY:	prep demo
 
-ALL: 	${PDUMP} ${PDUMP32} demo
+ALL: 	prep ${PDUMP} ${PDUMP32} demo
+
+prep:
+	mkdir work
 
 demo:
 	${MAKE} -C demo
