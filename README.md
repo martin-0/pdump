@@ -4,9 +4,9 @@ Process dumper ( pdump ) is a program aimed to dump a .text of a specified binar
 
 ### Quick info
 
-Currently only dynamically linked binaries are supported. Dump is achieved using ptrace syscall. Tracer-tracee relationship is estabilshed between pdump and executable. Tracee syscalls are intercepted and contents of the registers are modified to achieve the dump. 
-This approach works also on newer kernels where PEEK/POKE to a setuid process is not allowed.
-
+Currently only dynamically linked binaries are supported. Dump is achieved using ptrace syscall. Tracer-tracee relationship is estabilshed between pdump and executable. Tracee syscalls are intercepted and contents of the registers are modified to achieve the dump.--
+This approach works also on newer kernels where PEEK/POKE to a setuid process is not allowed.--
+--
 Right now two different binaries exist to trace 32b and 64b process.
 
 ```sh
