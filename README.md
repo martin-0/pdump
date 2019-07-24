@@ -1,12 +1,12 @@
 # pdump
 
-pdump (process dumper) is a program that dumps the .text of specified binary. It's a proof of concept that unsetting read permission on a binary doesn't mean user can't read it (at least on i386/x86_64 architecture). 
+Process dumper ( pdump ) is a program aimed to dump a .text of a specified binary. It's a proof of concept that unsetting read permission on a binary doesn't mean user can't read it (at least on i386/x86_64 architecture).
 
 ### Quick info
 
-TODO..
+Currently only dynamically linked binaries are supported. Dump is achieved using ptrace syscall. Tracer-tracee relationship is estabilshed between pdump and executable. Tracee syscalls are intercepted and contents of the registers are modified to achieve the dump. 
+This approach works also on newer kernels where PEEK/POKE to a setuid process is not allowed.
 
-Binary has to be dynamically linked. If path to ld.so is not specified default libs are tried. No auto-guessing is done though.
 Right now two different binaries exist to trace 32b and 64b process.
 
 ```sh
