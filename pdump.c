@@ -371,9 +371,15 @@ void fancy_print(struct opts_t* o) {
 			"  tracee:\t%s\n"
 			"  dump file:\t%s\n"
 			"  dump size:\t0x%zx\n"
-			"  mask:\t\t0x%lx\n"
-			"  base reg:\t%s\n\n", 
-			o->chldpath, o->dpath, o->dsize, o->mask, reg_lookup_tbl[o->reg].name );
+			"  mask:\t\t0x%lx\n",
+			o->chldpath, o->dpath, o->dsize, o->mask);
+
+	if( o->d_addr ) {
+		fprintf(stderr, "  dump address:\t0x%lx\n\n", o->d_addr);
+	}
+	else {
+		fprintf(stderr, "  base reg:\t%s\n\n", reg_lookup_tbl[o->reg].name);
+	}
 }
 
 void usage() {
