@@ -356,7 +356,7 @@ void usage() {
 		"\t-f\tBinary to execute.\n\n"
 		"\t-l\tPath to a loader (ld.so).\n\n"
 		"\t-d\tDump the address to a custom file.\n\n"
-		"\t-a\tStart dumping from custom address. If used -r, -m, -s are ignored.\n\n"
+		"\t-a\tStart dumping from custom address. If used -r, -m, -t are ignored.\n\n"
 		"\t-s\tDump size (in hexadecimal).\n\n"
 		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default address is 0x%x. reg & mask = dump start address.\n\n"
 		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"

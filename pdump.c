@@ -382,10 +382,10 @@ void usage() {
 		"\t-f\tBinary to execute.\n\n"
 		"\t-d\tDump the address to a custom file.\n\n"
 		"\t-t\tExecutable is statically linked. This option changes default dump register to rdx.\n\n"
-		"\t-a\tStart dumping from custom address. If used -r, -m, -s are ignored.\n\n"
+		"\t-a\tStart dumping from custom address. If used -r, -m, -t are ignored.\n\n"
 		"\t-s\tDump size (in hexadecimal).\n\n"
 		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default address is 0x%lx. reg & mask = dump start address.\n\n"
-			"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"
+		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"
 		"\t\tSupported register names: rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15, rip\n\n"
 		"\t-v\tToggle verbose mode.\n\n"
 		"\t-? -h\tThis help.\n\n", DEFAULT_MASK);
