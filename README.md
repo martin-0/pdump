@@ -18,7 +18,7 @@ $
 ### Demo
 
 ```
-/pdump -v -f demo -d demo.blob
+./pdump -v -f demo -d demo.blob
 pdump options:
   tracee:	demo
   dump file:	demo.blob
