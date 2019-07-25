@@ -11,7 +11,7 @@ Right now two different binaries exist to trace 32b and 64b process.
 
 ```sh
 $ ./pdump
-usage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] [-l /path/to/ld.so] [-r register] [-m mask]
+usage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]
 $
 ```
 
