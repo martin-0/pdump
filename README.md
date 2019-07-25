@@ -18,42 +18,41 @@ $
 ### Demo
 
 ```
-$ ./pdump -f ./demo -v -d demo.blob
+/pdump -v -f demo -d demo.blob
 pdump options:
-  tracee:	./demo
-  ld.so:	/lib64/ld-linux-x86-64.so.2
+  tracee:	demo
   dump file:	demo.blob
   dump size:	0x2000
   mask:		0xfffffffffffff000
   base reg:	rbp
 
-pdump: linker entry point: 0x1090
-+pdump: 3240: ld base: 0x7f49137ef000, offset to brk: 0x1bec7
++pdump: 27119: start address: 0x7f40fa268090, offset to brk: 0x1ae37
 
 catch me if you can!
-+pdump: 3241: ld base: 0x7f2ba307a000, addr ld brk: 0x7f2ba3095ec7
-+pdump: 3241: child base: 0x560a3d49c000
++pdump: 27120: addr start: 0x7f63bf494090, addr brk: 0x7f63bf4aeec7
++pdump: 27120: dump address: 0x558513bbe000
 
-+pdump: 3241: registers just before syscall:
++pdump: 27120: registers just before syscall:
 rax		0xc
 rbx		0x1
 rcx		0xc
 rdx		0x4d
 rsi		0x4f
 rdi		0x0
-rbp		0x560a3d49c040
-rsp		0x7ffc70a4f478
+rbp		0x558513bbe040
+rsp		0x7ffd853fc248
 r8		0x16
-r9		0x7f2ba309b665
+r9		0x7f63bf4b4665
 r10		0x1
 r11		0x346
 r12		0x9
-r13		0x7f2ba307c660
+r13		0x7f63bf495660
 r14		0x1
 r15		0x1000
-rip		0x7f2ba3095ec7
+rip		0x7f63bf4aeec7
 
 pdump: done.
+$
 
 $ hd -n 64 demo.blob
 00000000  7f 45 4c 46 02 01 01 00  00 00 00 00 00 00 00 00  |.ELF............|
