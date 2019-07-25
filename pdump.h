@@ -55,12 +55,13 @@
 
 struct opts_t {
         char* chldpath;			// path to child to be executed
-        char* ldpath;			// path to ld.so
         char* dpath;			// path to a dump file
         size_t dsize;			// how much to dump
+	unsigned long d_addr;		// custom dump address
         unsigned long mask;		// preferred mask
         int reg;			// register that holds .text address before brk()
 	int verbose;			// verbose toggle
+	int is_static;			// indicates we are working on static binary
 };
 
 struct regentry_t {
@@ -69,7 +70,6 @@ struct regentry_t {
 }; 
 
 #ifdef __x86_64__
-// let's keep the name different to one defined in sys/reg.h
 enum regidx_t {
 	reg_rax= 0, reg_rbx, reg_rcx, reg_rdx, reg_rsi, reg_rdi, reg_rbp, reg_rsp, reg_r8, reg_r9, reg_r10,
 	reg_r11, reg_r12, reg_r13, reg_r14, reg_r15, reg_rip
@@ -82,7 +82,6 @@ struct regentry_t  reg_lookup_tbl[] = {
 	{ "r15", R14 }, { "rip", RIP }
 };
 
-#define	DEFAULT_LD			"/lib64/ld-linux-x86-64.so.2"
 #define	DEFAULT_BASEREG			( reg_rbp )
 #define	DEFAULT_MASK			0xfffffffffffff000
 
@@ -96,19 +95,16 @@ struct regentry_t  reg_lookup_tbl[] = {
 	{ "edi", EDI }, { "ebp", EBP }, { "esp", UESP}, { "eip", EIP }
 };
 
-#define	DEFAULT_LD			"/lib/ld-linux.so.2"
 #define	DEFAULT_BASEREG			( reg_ebp )
 #define	DEFAULT_MASK			0xfffff000
-#endif
+#endif	/* ifdef __x86_64__*/
+
 
 #define	DEFAULT_DUMP_FILE		"dump.out"
 #define	DEFAULT_DUMP_SIZE		0x2000
 
-// get the entry point address from library
-unsigned long get_entry(char* lpath);
-
 // trace the child till it starts executing new program
-long get_to_ldentry(struct user_regs_struct* regs, pid_t pid, int* status);
+long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status);
 
 // trace the child till the given ip
 int trace_until(struct user_regs_struct* regs, unsigned long ip, pid_t pid, int* status);

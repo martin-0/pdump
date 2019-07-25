@@ -1,4 +1,4 @@
-/* i386 v0.2 (c) 2019 martin */
+/* i386 v0.3 (c) 2019 martin */
 
 #include <stdio.h>
 #include <unistd.h>
@@ -24,10 +24,9 @@ int main(int argc, char** argv) {
 	// set the options first
 	handle_args(&opts, argc, argv);
 
-	if (opts.verbose)
+	if (opts.verbose) {
 		fancy_print(&opts);
-
-	// XXX: do we want to use O_TRUNC really ?
+	}
 
 	int dfd;						// dump fd
 	if ( (dfd = open(opts.dpath, O_CREAT|O_TRUNC|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0) {
@@ -36,36 +35,32 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 
-	// ld.so entry point
-	unsigned long ofst_ld_entry = get_entry(opts.ldpath);
-
-	fprintf (stderr, "pdump: linker entry point: 0x%lx\n", ofst_ld_entry);
-
 	pid_t pid;
 	if ( (pid=fork()) == 0) {
 		handle_child(opts.chldpath);
 	}
 
 	struct user_regs_struct regs;
-	unsigned long addr_ld_base = 0;				// current ld base 
-	unsigned long ofst_ld_brk_in = 0;			// offset from ld base to brk() syscall entry
+	unsigned long addr_start = 0;				// starting address of a program, ld.so or the actual program
+	unsigned long ofst_to_brk_in = 0;			// offset from start address to brk() syscall entry
 	int status, intosys;
 
-	// STEP #1	get the brk() offset in ld.so 
-	addr_ld_base = get_to_ldentry(&regs, pid, &status) - ofst_ld_entry;
+	// #STEP #1:	find the offset to brk() syscall
 
-	// continue the exectution to the next syscall ; the first syscall after execve() is brk()
+	// get the child to a state just after execve()
+	addr_start = get_to_entry(&regs, pid, &status);
+
+	// continue the exectution to the next syscall; the first syscall after execve() is brk(), let's catch that
 	PTRACE_SYSCALL(pid)
 	intosys = 1;
 	while( (catch_syscall(&status, pid, SYS_brk, &intosys)) == 0);
 	
 	PTRACE_GETREGS(pid, &regs)
 
-	ofst_ld_brk_in = regs.eip - 2 - addr_ld_base;		// -2 to compensate for either syscall or int 0x80
+	ofst_to_brk_in = regs.eip - 2 - addr_start;		// -2 to compensate for either syscall or int 0x80
+	fprintf(stderr, "+pdump: %u: start address: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_start, ofst_to_brk_in);
 
-	fprintf(stderr, "+pdump: %u: ld base: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_ld_base, ofst_ld_brk_in);
-
-	// we don't care about the child any more .. kill it.. 
+	// we don't care about the child any more.. 
 	PTRACE_DETACH(pid)
 	wait(&status);
 
@@ -80,24 +75,34 @@ int main(int argc, char** argv) {
 		handle_child(opts.chldpath);
 	}
 	
-	unsigned long addr_ld_brk_in = 0;			// actual addr of the brk() in ld.so for current child
+	unsigned long addr_dump_base, addr_brk_in = 0;
 
-	// calculate the new ld_base (due to ASLR) and get the syscall in brk() instruction
-	addr_ld_base = get_to_ldentry(&regs, pid, &status) - ofst_ld_entry;
-	addr_ld_brk_in = addr_ld_base + ofst_ld_brk_in;
+	// calculate the new brk() syscall address
+	addr_start = get_to_entry(&regs, pid, &status);
+	addr_brk_in = addr_start + ofst_to_brk_in;		// in case of static binary ofst_to_brk_in is the actual address (-addr_start was done during first run)
 
-	fprintf (stderr, "+pdump: %u: ld base: 0x%lx, addr ld brk: 0x%lx\n", pid, addr_ld_base, addr_ld_brk_in);
+	fprintf (stderr, "+pdump: %u: addr start: 0x%lx, addr brk: 0x%lx\n", pid, addr_start, addr_brk_in);
 
 	// trace until the brk() syscall instruction
-	if ((trace_until(&regs, addr_ld_brk_in, pid, &status)) != 0) {
+	if ((trace_until(&regs, addr_brk_in, pid, &status)) != 0) {
 		fprintf (stderr, "+pdump: oops: neither trace_until() nor assert_status() caught the condition..\n");
 		PTRACE_DETACH(pid)
 		exit(1);
 	}
 
-	unsigned long addr_pie_base = *((unsigned long*)&regs + reg_lookup_tbl[opts.reg].idx ) & opts.mask;
+	// custom address has the highest priority
+	if (opts.d_addr) {
+		addr_dump_base = opts.d_addr;
+	}
+	// static binaries are not PIE
+	else if (opts.is_static) {
+		addr_dump_base = addr_start & opts.mask;
+	}
+	else {
+ 		addr_dump_base = *((unsigned long long*)&regs + reg_lookup_tbl[opts.reg].idx ) & opts.mask;
+	}
 
-	fprintf(stderr,"+pdump: %u: child base: 0x%lx\n", pid, addr_pie_base);
+	fprintf(stderr,"+pdump: %u: dump address: 0x%lx\n", pid, addr_dump_base);
 
 	if (opts.verbose) { 
 		fprintf(stderr, "\n+pdump: %u: registers just before syscall:\n", pid);
@@ -105,7 +110,7 @@ int main(int argc, char** argv) {
 	}
 
 	regs.ebx = dfd;
-	regs.ecx = addr_pie_base;
+	regs.ecx = addr_dump_base;
 	regs.edx = opts.dsize;
 	regs.eax = SYS_write;
 
@@ -119,15 +124,15 @@ int main(int argc, char** argv) {
 }
 
 // requires child to be stopped just before its execve()
-long get_to_ldentry(struct user_regs_struct* regs, pid_t pid, int* status) {
-	long addr_ld_entry = 0;
+long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status) {
+	long addr_entry = 0;
 	int intosys = 0;
 
 	wait(status);
 	assert_status(status, pid);
 
 	if (WSTOPSIG(*status) != SIGSTOP) {
-		fprintf(stderr, "oops: get_to_ldentry: process is expected to be stopped by SIGSTOP\n");
+		fprintf(stderr, "oops: get_to_entry: process is expected to be stopped by SIGSTOP\n");
 		PTRACE_DETACH(pid)
 		exit(1);
 	}
@@ -140,13 +145,13 @@ long get_to_ldentry(struct user_regs_struct* regs, pid_t pid, int* status) {
 
 	PTRACE_GETREGS(pid, regs)
 
-	addr_ld_entry = regs->eip;
+	addr_entry = regs->eip;
 
 	#ifdef DEBUG
-		fprintf(stdout, "DEBUG: get_to_ldentry: got ld_entry: 0x%lx\n", addr_ld_entry);
+		fprintf(stdout, "DEBUG: get_to_entry: got entry point: 0x%lx\n", addr_entry);
 		regdump(regs);
 	#endif
-	return addr_ld_entry;
+	return addr_entry;
 }
 
 int catch_syscall(int* status, pid_t pid, long sysnr, int* intosys) {
@@ -232,25 +237,11 @@ int trace_until(struct user_regs_struct* regs, unsigned long ip, pid_t pid, int*
 	return -1;
 }
 
+
 void regdump(struct user_regs_struct* r) {
 	fprintf (stderr,"eax\t\t0x%lx\necx\t\t0x%lx\nedx\t\t0x%lx\nebx\t\t0x%lx\n"
 			"esp\t\t0x%lx\nebp\t\t0x%lx\nesi\t\t0x%lx\nedi\t\t0x%lx\neip\t\t0x%lx\n\n",
 			r->eax, r->ecx, r->edx, r->ebx, r->esp, r->ebp, r->esi, r->edi, r->eip);
-}
-
-unsigned long get_entry(char* lib) {
-	int fd;
-	if ( (fd = open(lib, O_RDONLY)) < 0) {
-		fprintf(stderr, "oops: pdump: failed to open linker %s ", lib);
-		perror("");
-		exit(1);
-	}
-	unsigned long entry;
-
-	lseek(fd, 0x18, SEEK_SET);
-	read(fd, &entry, sizeof(entry));
-	close(fd);
-	return entry;
 }
 
 int handle_args(struct opts_t* o, int argc, char** argv) {
@@ -259,25 +250,29 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 
 	// let's set defaults first
 	o->chldpath = NULL;
-	o->ldpath = DEFAULT_LD;
 	o->dpath = DEFAULT_DUMP_FILE;
 	o->dsize = DEFAULT_DUMP_SIZE;
+	o->d_addr = 0;
 	o->mask = DEFAULT_MASK;
 	o->reg = DEFAULT_BASEREG;
 	o->verbose = 0;
+	o->is_static = 0;
 
-	while ((opt = getopt(argc, argv, "f:l:d:s:m:r:vh?")) != -1 ) {
+	while ((opt = getopt(argc, argv, "f:d:s:ta:m:r:vh?")) != -1 ) {
 		switch(opt) {
 		case 'f':	o->chldpath = optarg;
-				break;
-
-		case 'l':	o->ldpath = optarg;
 				break;
 
 		case 'd':	o->dpath = optarg;
 				break;
 
 		case 's':	o->dsize = strtoll(optarg, 0, 16);
+				break;
+
+		case 't':	o->is_static = 1;
+				break;
+
+		case 'a':	o->d_addr = strtoll(optarg, 0, 16);
 				break;
 
 		case 'm':	// set custom mask when figuring out .text base address
@@ -338,26 +333,30 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 		usage();
 	}
 
+	if (o->is_static) {
+		o->reg = reg_edx;
+	}
+
 	return 0;
 }
 
 void fancy_print(struct opts_t* o) {
 	fprintf (stderr, "pdump options:\n"
 			"  tracee:\t%s\n"
-			"  ld.so:\t%s\n"
 			"  dump file:\t%s\n"
 			"  dump size:\t0x%zx\n"
 			"  mask:\t\t0x%lx\n"
 			"  base reg:\t%s\n\n", 
-			o->chldpath, o->ldpath, o->dpath, o->dsize, o->mask, reg_lookup_tbl[o->reg].name );
+			o->chldpath, o->dpath, o->dsize, o->mask, reg_lookup_tbl[o->reg].name );
 }
 
 void usage() {
 	printf(
-		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] [-l /path/to/ld.so] [-r register] [-m mask]\n\n"
+		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
 		"\t-f\tBinary to execute.\n\n"
 		"\t-l\tPath to a loader (ld.so).\n\n"
 		"\t-d\tDump the address to a custom file.\n\n"
+		"\t-a\tStart dumping from custom address. If used -r, -m, -s are ignored.\n\n"
 		"\t-s\tDump size (in hexadecimal).\n\n"
 		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default address is 0x%x. reg & mask = dump start address.\n\n"
 		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"
@@ -367,3 +366,4 @@ void usage() {
 
 	exit(1);
 }
+
