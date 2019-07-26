@@ -1,4 +1,4 @@
-/* x86_64 v0.3 (c) 2019 martin */
+/* (c) 2019 martin */
 
 #include <stdio.h>
 #include <unistd.h>
@@ -16,14 +16,14 @@
 
 #include "pdump.h"
 
-void fancy_print(struct opts_t* o);
+#define DEBUG	1
 
 int main(int argc, char** argv) {
 	struct opts_t opts;
 
 	// set the options first
 	handle_args(&opts, argc, argv);
-
+	opts.verbose = 1;
 	if (opts.verbose) {
 		fancy_print(&opts);
 	}
@@ -43,21 +43,37 @@ int main(int argc, char** argv) {
 	struct user_regs_struct regs;
 	unsigned long addr_start = 0;				// starting address of a program, ld.so or the actual program
 	unsigned long ofst_to_brk_in = 0;			// offset from start address to brk() syscall entry
-	int status, intosys;
+	int status, intosys, sysnr;
+
+	sysnr = SYS_brk;					// first syscall to catch is SYS_brk
 
 	// #STEP #1:	find the offset to brk() syscall
 
 	// get the child to a state just after execve()
-	addr_start = get_to_entry(&regs, pid, &status);
+	addr_start = get_to_entry(&regs, pid, &status, &opts);
+
+	// makes sense only on 64b platform
+	#ifdef __x86_64__
+	if (opts.is_32b) {
+		opts.mask &= 0xffffffff;
+		opts.d_addr &= 0xffffffff;
+		sysnr = SYS32_brk;
+	}
+	#endif
 
 	// continue the exectution to the next syscall; the first syscall after execve() is brk(), let's catch that
 	PTRACE_SYSCALL(pid)
 	intosys = 1;
-	while( (catch_syscall(&status, pid, SYS_brk, &intosys)) == 0);
+	while( (catch_syscall(&regs, &status, pid, sysnr, &intosys)) == 0);
 	
 	PTRACE_GETREGS(pid, &regs)
 
-	ofst_to_brk_in = regs.rip - 2 - addr_start;		// -2 to compensate for either syscall or int 0x80
+	#ifdef __x86_64__
+		ofst_to_brk_in = regs.rip - 2 - addr_start;		// -2 to compensate for either syscall or int 0x80
+	#else
+		ofst_to_brk_in = regs.eip - 2 - addr_start;		// -2 to compensate for either syscall or int 0x80
+	#endif
+
 	fprintf(stderr, "+pdump: %u: start address: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_start, ofst_to_brk_in);
 
 	// we don't care about the child any more.. 
@@ -78,7 +94,7 @@ int main(int argc, char** argv) {
 	unsigned long addr_dump_base, addr_brk_in = 0;
 
 	// calculate the new brk() syscall address
-	addr_start = get_to_entry(&regs, pid, &status);
+	addr_start = get_to_entry(&regs, pid, &status, &opts);
 	addr_brk_in = addr_start + ofst_to_brk_in;		// in case of static binary ofst_to_brk_in is the actual address (-addr_start was done during first run)
 
 	fprintf (stderr, "+pdump: %u: addr start: 0x%lx, addr brk: 0x%lx\n", pid, addr_start, addr_brk_in);
@@ -99,7 +115,11 @@ int main(int argc, char** argv) {
 		addr_dump_base = addr_start & opts.mask;
 	}
 	else {
- 		addr_dump_base = *((unsigned long long*)&regs + reg_lookup_tbl[opts.reg].idx ) & opts.mask;
+		#ifdef __x86_64__
+			addr_dump_base = *((unsigned long long*)&regs + reg_lookup_tbl[opts.reg].idx ) & opts.mask;
+		#else
+			addr_dump_base = *((unsigned long*)&regs + reg_lookup_tbl[opts.reg].idx ) & opts.mask;
+		#endif
 	}
 
 	fprintf(stderr,"+pdump: %u: dump address: 0x%lx\n", pid, addr_dump_base);
@@ -109,10 +129,26 @@ int main(int argc, char** argv) {
 		regdump(&regs);
 	}
 
-	regs.rdi = dfd;
-	regs.rsi = addr_dump_base;
-	regs.rdx = opts.dsize;
-	regs.rax = SYS_write;
+	#ifdef __x86_64__
+		if (opts.is_32b) {
+			regs.rbx = dfd;
+			regs.rcx = addr_dump_base;
+			regs.rdx = opts.dsize;
+			regs.rax = SYS32_write;
+		}
+		else {
+			regs.rdi = dfd;
+			regs.rsi = addr_dump_base;
+			regs.rdx = opts.dsize;
+			regs.rax = SYS_write;
+		}
+	#else
+		regs.ebx = dfd;
+		regs.ecx = addr_dump_base;
+		regs.edx = opts.dsize;
+		regs.eax = SYS_write;
+	#endif
+
 
 	PTRACE_SETREGS(pid, &regs)
 	PTRACE_DETACH(pid)
@@ -124,7 +160,7 @@ int main(int argc, char** argv) {
 }
 
 // requires child to be stopped just before its execve()
-long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status) {
+long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status, struct opts_t* o) {
 	long addr_entry = 0;
 	int intosys = 0;
 
@@ -137,25 +173,66 @@ long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status) {
 		exit(1);
 	}
 
-	// we should be in SIGSTOP now
-	PTRACE_SYSCALL(pid)	
+	#ifdef __x86_64__
+		unsigned long sysnr_execve = SYS_execve;
 
-	// let the child do the execve()
-	while( (catch_syscall(status, pid, SYS_execve, &intosys)) == 0);
+		// special attention to %cs register is paid ; if it changes we are very likely tracing 32b process
+		while (1) {
+			printf(".");
+			PTRACE_SYSCALL(pid);
+
+			wait(status);
+			assert_status(status, pid);
+
+			// basically do the catch_syscall() but pay attention to %cs register
+			if (WSTOPSIG(*status) == SIGTRAP) {
+				PTRACE_GETREGS(pid, regs);
+
+				printf ("got_entry cs: %llx, rax: %llx, catching: %lx\n", regs->cs, regs->orig_rax, sysnr_execve);
+
+				// detect 32b process
+				if (regs->cs == REG_CS_x32 || regs->cs == REG_CS_32_COMPAT) {
+					printf ("32b process!\n");
+					sysnr_execve = SYS32_execve;
+					o->is_32b = 1;
+		
+					fprintf(stderr, "DEBUG: get_to_entry: 32b process detected.\n");
+				}
+
+				if (regs->orig_rax == sysnr_execve) {
+					// we are done
+					if (intosys) 
+						break;
+
+					intosys = 1;
+				}
+			}
+		}
+	#else
+		// on 32b we just need to catch SYS_execve
+		PTRACE_SYSCALL(pid);
+		while( (catch_syscall(regs, status, pid, SYS_execve, &intosys)) == 0);
+	#endif 
 
 	PTRACE_GETREGS(pid, regs)
 
-	addr_entry = regs->rip;
+	#ifdef __x86_64__
+		addr_entry = regs->rip;
+	#else
+		addr_entry = regs->eip;
+	#endif
 
 	#ifdef DEBUG
 		fprintf(stdout, "DEBUG: get_to_entry: got entry point: 0x%lx\n", addr_entry);
 		regdump(regs);
 	#endif
+
 	return addr_entry;
 }
 
-int catch_syscall(int* status, pid_t pid, long sysnr, int* intosys) {
-	long curnr, ret;
+int catch_syscall(struct user_regs_struct* regs, int* status, pid_t pid, long sysnr, int* intosys) {
+	unsigned long curnr, ret;
+
 	wait(status);
 	assert_status(status, pid);
 
@@ -164,26 +241,40 @@ int catch_syscall(int* status, pid_t pid, long sysnr, int* intosys) {
 		/* 	syscall entry				*/
 		/*	syscall leave				*/
 		/*	child calls exec			*/
+		PTRACE_GETREGS(pid, regs);
 
-		curnr = ptrace(PTRACE_PEEKUSER, pid, sizeof(long)*ORIG_RAX, 0);
-		ret = ptrace(PTRACE_PEEKUSER, pid, sizeof(long)*RAX, 0);
+		#ifdef __x86_64__
+			curnr = regs->orig_rax;
+			ret = regs->rax;
+		#else
+			curnr = regs->orig_eax;
+			ret = regs->eax;
+		#endif
 
-		#ifdef DEBUG
-			fprintf (stderr, "DEBUG: manage_wait: syscall: %ld, ret: %ld\n", curnr, ret);
+		#if DEBUG > 1
+			fprintf (stderr, "DEBUG: catch_syscall: syscall: %lx, catching: %lx, ret: %ld\n", curnr, sysnr, ret);
 		#endif
 
 		// we caught the correct syscall
 		if (curnr == sysnr) { 
 			// if we are already in syscall we are now leaving and we are done
-			if (*intosys)
+			if (*intosys) {
 				return 1;
+			}
 		
 			// else toggle the flag and continue execution	
 			*intosys = 1;
 		 }
 	}
 
+	printf ("catch_syscall wait");
+
 	PTRACE_SYSCALL(pid)
+
+	#if DEBUG > 1
+		fprintf(stderr, "DEBUG: catch_syscall: end\n");
+	#endif
+
 	return 0;	
 }
 
@@ -231,24 +322,35 @@ int trace_until(struct user_regs_struct* regs, unsigned long ip, pid_t pid, int*
 
 		PTRACE_GETREGS(pid, regs)
 
-		if (regs->rip == ip)
-			return 0;
+		#ifdef __x86_64__
+			if (regs->rip == ip)
+				return 0;
+		#else
+			if (regs->eip == ip)
+				return 0;
+		#endif
 	}
 	return -1;
 }
 
 void regdump(struct user_regs_struct* r) {
-	fprintf (stderr,"rax\t\t0x%llx\nrbx\t\t0x%llx\nrcx\t\t0x%llx\nrdx\t\t0x%llx\n"
-			"rsi\t\t0x%llx\nrdi\t\t0x%llx\nrbp\t\t0x%llx\nrsp\t\t0x%llx\n"
-			"r8\t\t0x%llx\nr9\t\t0x%llx\nr10\t\t0x%llx\nr11\t\t0x%llx\n"
-			"r12\t\t0x%llx\nr13\t\t0x%llx\nr14\t\t0x%llx\nr15\t\t0x%llx\nrip\t\t0x%llx\n\n", 
-			r->rax, r->rbx, r->rcx, r->rdx, r->rsi, r->rdi, r->rbp, r->rsp, r->r8,
-			r->r9, r->r10, r->r11, r->r12, r->r13, r->r14, r->r15, r->rip);
+	#ifdef __x86_64__
+		fprintf (stderr,"rax\t\t0x%llx\nrbx\t\t0x%llx\nrcx\t\t0x%llx\nrdx\t\t0x%llx\n"
+				"rsi\t\t0x%llx\nrdi\t\t0x%llx\nrbp\t\t0x%llx\nrsp\t\t0x%llx\n"
+				"r8\t\t0x%llx\nr9\t\t0x%llx\nr10\t\t0x%llx\nr11\t\t0x%llx\n"
+				"r12\t\t0x%llx\nr13\t\t0x%llx\nr14\t\t0x%llx\nr15\t\t0x%llx\nrip\t\t0x%llx\n\n", 
+				r->rax, r->rbx, r->rcx, r->rdx, r->rsi, r->rdi, r->rbp, r->rsp, r->r8,
+				r->r9, r->r10, r->r11, r->r12, r->r13, r->r14, r->r15, r->rip);
+
+	#else
+		fprintf (stderr,"eax\t\t0x%lx\necx\t\t0x%lx\nedx\t\t0x%lx\nebx\t\t0x%lx\n"
+				"esp\t\t0x%lx\nebp\t\t0x%lx\nesi\t\t0x%lx\nedi\t\t0x%lx\neip\t\t0x%lx\n\n",
+				r->eax, r->ecx, r->edx, r->ebx, r->esp, r->ebp, r->esi, r->edi, r->eip);
+	#endif
 }
 
 int handle_args(struct opts_t* o, int argc, char** argv) {
-	int i,opt,reg;
-	unsigned long mask;
+	int i,opt;
 
 	// let's set defaults first
 	o->chldpath = NULL;
@@ -259,6 +361,7 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 	o->reg = DEFAULT_BASEREG;
 	o->verbose = 0;
 	o->is_static = 0;
+	o->is_32b = 0;
 
 	while ((opt = getopt(argc, argv, "f:d:s:ta:m:r:vh?")) != -1 ) {
 		switch(opt) {
@@ -286,62 +389,97 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 					optarg[i] = tolower(optarg[i]);
 				}
 
-				// not exactly an eye candy.. 
-				if (strncmp(optarg, "rax", 3) == 0) {
-					o->reg = reg_rax;
-				}
-				else if ((strncmp(optarg, "rbx", 3) == 0)) {
-					o->reg = reg_rbx;
-				}
-				else if ((strncmp(optarg, "rcx", 3) == 0)) {
-					o->reg = reg_rcx;
-				}
-				else if ((strncmp(optarg, "rdx", 3) == 0)) {
-					o->reg = reg_rdx;
-				}
-				else if ((strncmp(optarg, "rsi", 3) == 0)) {
-					o->reg = reg_rsi;
-				}
-				else if ((strncmp(optarg, "rdi", 3) == 0)) {
-					o->reg = reg_rdi;
-				}
-				else if ((strncmp(optarg, "rbp", 3) == 0)) {
-					o->reg = reg_rbp;
-				}
-				else if ((strncmp(optarg, "rsp", 3) == 0)) {
-					o->reg = reg_rsp;
-				}
-				else if ((strncmp(optarg, "r8", 3) == 0)) {
-					o->reg = reg_r8;
-				}
-				else if ((strncmp(optarg, "r9", 3) == 0)) {
-					o->reg = reg_r9;
-				}
-				else if ((strncmp(optarg, "r10", 3) == 0)) {
-					o->reg = reg_r10;
-				}
-				else if ((strncmp(optarg, "r11", 3) == 0)) {
-					o->reg = reg_r11;
-				}
-				else if ((strncmp(optarg, "r12", 3) == 0)) {
-					o->reg = reg_r12;
-				}
-				else if ((strncmp(optarg, "r13", 3) == 0)) {
-					o->reg = reg_r13;
-				}
-				else if ((strncmp(optarg, "r14", 3) == 0)) {
-					o->reg = reg_r14;
-				}
-				else if ((strncmp(optarg, "r15", 3) == 0)) {
-					o->reg = reg_r15;
-				}
-				else if ((strncmp(optarg, "rip", 3) == 0)) {
-					o->reg = reg_rip;
-				}
-				else {
-					fprintf(stderr, "pdump: unsupported register %s\n", optarg);
-					usage();
-				}
+				#ifdef __x86_64__
+					// not exactly an eye candy.. 
+					if (strncmp(optarg, "rax", 3) == 0) {
+						o->reg = reg_rax;
+					}
+					else if ((strncmp(optarg, "rbx", 3) == 0)) {
+						o->reg = reg_rbx;
+					}
+					else if ((strncmp(optarg, "rcx", 3) == 0)) {
+						o->reg = reg_rcx;
+					}
+					else if ((strncmp(optarg, "rdx", 3) == 0)) {
+						o->reg = reg_rdx;
+					}
+					else if ((strncmp(optarg, "rsi", 3) == 0)) {
+						o->reg = reg_rsi;
+					}
+					else if ((strncmp(optarg, "rdi", 3) == 0)) {
+						o->reg = reg_rdi;
+					}
+					else if ((strncmp(optarg, "rbp", 3) == 0)) {
+						o->reg = reg_rbp;
+					}
+					else if ((strncmp(optarg, "rsp", 3) == 0)) {
+						o->reg = reg_rsp;
+					}
+					else if ((strncmp(optarg, "r8", 3) == 0)) {
+						o->reg = reg_r8;
+					}
+					else if ((strncmp(optarg, "r9", 3) == 0)) {
+						o->reg = reg_r9;
+					}
+					else if ((strncmp(optarg, "r10", 3) == 0)) {
+						o->reg = reg_r10;
+					}
+					else if ((strncmp(optarg, "r11", 3) == 0)) {
+						o->reg = reg_r11;
+					}
+					else if ((strncmp(optarg, "r12", 3) == 0)) {
+						o->reg = reg_r12;
+					}
+					else if ((strncmp(optarg, "r13", 3) == 0)) {
+						o->reg = reg_r13;
+					}
+					else if ((strncmp(optarg, "r14", 3) == 0)) {
+						o->reg = reg_r14;
+					}
+					else if ((strncmp(optarg, "r15", 3) == 0)) {
+						o->reg = reg_r15;
+					}
+					else if ((strncmp(optarg, "rip", 3) == 0)) {
+						o->reg = reg_rip;
+					}
+					else {
+						fprintf(stderr, "pdump: unsupported register %s\n", optarg);
+						usage();
+					}
+				#else
+					// not exactly an eye candy..
+					if (strncmp(optarg, "eax", 3) == 0) {
+						o->reg = reg_eax;
+					}
+					else if ((strncmp(optarg, "ebx", 3) == 0)) {
+						o->reg = reg_ebx;
+					}
+					else if ((strncmp(optarg, "ecx", 3) == 0)) {
+						o->reg = reg_ecx;
+					}
+					else if ((strncmp(optarg, "edx", 3) == 0)) {
+						o->reg = reg_edx;
+					}
+					else if ((strncmp(optarg, "esi", 3) == 0)) {
+						o->reg = reg_esi;
+					}
+					else if ((strncmp(optarg, "edi", 3) == 0)) {
+						o->reg = reg_edi;
+					}
+					else if ((strncmp(optarg, "ebp", 3) == 0)) {
+						o->reg = reg_ebp;
+					}
+					else if ((strncmp(optarg, "esp", 3) == 0)) {
+						o->reg = reg_esp;
+					}
+					else if ((strncmp(optarg, "eip", 3) == 0)) {
+						o->reg = reg_eip;
+					}
+					else {
+						fprintf(stderr, "pdump: unsupported register %s\n", optarg);
+						usage();
+					}
+				#endif
 				break;
 
 		case 'v':	o->verbose++;
@@ -360,7 +498,11 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 	}
 
 	if (o->is_static) {
-		o->reg = reg_rdx;
+		#ifdef __x86_64__
+			o->reg = reg_rdx;	
+		#else
+			o->reg = reg_edx;
+		#endif
 	}
 
 	return 0;
@@ -382,6 +524,9 @@ void fancy_print(struct opts_t* o) {
 	}
 }
 
+// XXX: better merge of these functions 
+
+#ifdef __x86_64__
 void usage() {
         printf(
 		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
@@ -398,3 +543,22 @@ void usage() {
 
 	exit(1);
 }
+#else
+void usage() {
+	printf(
+		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
+		"\t-f\tBinary to execute.\n\n"
+		"\t-l\tPath to a loader (ld.so).\n\n"
+		"\t-d\tDump the address to a custom file.\n\n"
+		"\t-a\tStart dumping from custom address. If used -r, -m, -t are ignored.\n\n"
+		"\t-s\tDump size (in hexadecimal).\n\n"
+		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default address is 0x%x. reg & mask = dump start address.\n\n"
+		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"
+			"\t\tSupported register names: eax, ebx, ecx, edx, esi, edi, ebp, eip\n\n"
+		"\t-v\tToggle verbose mode.\n\n"
+		"\t-? -h\tThis help.\n\n", DEFAULT_MASK);
+
+	exit(1);
+}
+
+#endif
