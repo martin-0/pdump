@@ -3,18 +3,18 @@ CFLAGS=-g
 OUTDIR=work
 PDUMP=pdump
 
-.PHONY:	prep demo
+.PHONY: demo prep
 
-ALL: 	${PDUMP} demo
+ALL: 	prep ${PDUMP} demo
 
 prep:
 	mkdir -p work
 
-demo:	prep
+demo:
 	${MAKE} -C demo
 
 ${PDUMP}:	${PDUMP}.c ${PDUMP}.h
-	gcc ${CFLAGS64} -o ${OUTDIR}/${PDUMP} ${PDUMP}.c
+	gcc ${CFLAGS} -o ${OUTDIR}/${PDUMP} ${PDUMP}.c
 
 clean:
 	rm -f ${OUTDIR}/${PDUMP}
