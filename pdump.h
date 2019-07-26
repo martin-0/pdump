@@ -62,6 +62,7 @@ struct opts_t {
         int reg;			// register that holds .text address before brk()
 	int verbose;			// verbose toggle
 	int is_static;			// indicates we are working on static binary
+	int is_32b;			// tracee is 32b 
 };
 
 struct regentry_t {
@@ -85,6 +86,19 @@ struct regentry_t  reg_lookup_tbl[] = {
 #define	DEFAULT_BASEREG			( reg_rbp )
 #define	DEFAULT_MASK			0xfffffffffffff000
 
+// XXX: maybe I should use PTRACE_GETREGSET 
+// some good hints can be found in strace:
+//	https://github.com/bnoordhuis/strace/blob/master/syscall.c#L1250
+//
+// use these to detect the trace mode
+#define	REG_CS_64			0x33
+#define	REG_CS_x32			0x2bULL		// x32 mode (x86-64 in 32b)
+#define	REG_CS_32_COMPAT		0x23ULL		// 32b
+
+#define	SYS32_write			0x4
+#define	SYS32_execve			0xb
+#define	SYS32_brk			0x2d
+
 #else
 enum regidx_t {
 	reg_eax = 0, reg_ebx, reg_ecx, reg_edx, reg_esi, reg_edi, reg_ebp, reg_esp, reg_eip
@@ -103,14 +117,14 @@ struct regentry_t  reg_lookup_tbl[] = {
 #define	DEFAULT_DUMP_FILE		"dump.out"
 #define	DEFAULT_DUMP_SIZE		0x2000
 
-// trace the child till it starts executing new program
-long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status);
+// trace the child till it starts executing new program and detect if tracee is 32b
+long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status, struct opts_t* o);
 
 // trace the child till the given ip
 int trace_until(struct user_regs_struct* regs, unsigned long ip, pid_t pid, int* status);
 
 // trace the child till it reaches given syscall
-int catch_syscall(int* status, pid_t pid, long sysnr, int* intosys);
+int catch_syscall(struct user_regs_struct* regs, int* status, pid_t pid, long sysnr, int* intosys);
 
 // assert the current child status ; terminate if child is finished
 void assert_status(int* status, pid_t pid);
@@ -124,7 +138,10 @@ int handle_args(struct opts_t* o, int argc, char** argv);
 // dump the contents of handful of registers
 void regdump(struct user_regs_struct* r);
 
-// print fancy usage
+// print parameters used during execution
+void fancy_print(struct opts_t* o);
+
+// print usage
 void usage();
 
 #endif /* ifndef HAVE_PDUMP_H */
