@@ -149,7 +149,6 @@ int main(int argc, char** argv) {
 		regs.eax = SYS_write;
 	#endif
 
-
 	PTRACE_SETREGS(pid, &regs)
 	PTRACE_DETACH(pid)
 
@@ -178,7 +177,6 @@ long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status, struct 
 
 		// special attention to %cs register is paid ; if it changes we are very likely tracing 32b process
 		while (1) {
-			printf(".");
 			PTRACE_SYSCALL(pid);
 
 			wait(status);
