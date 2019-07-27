@@ -5,7 +5,6 @@ USER=nobody
 
 ifeq ($(ARCHBITS),64)
 	CFLAGS32:= ${CFLAGS} -m32
-	
 	DEMO32:= ${DEMO}32
 endif
 
