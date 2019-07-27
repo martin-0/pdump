@@ -88,7 +88,7 @@ struct regentry_t  reg_lookup_tbl[] = {
 #define	DEFAULT_MASK			0xfffffffffffff000L
 
 // XXX: maybe I should use PTRACE_GETREGSET 
-// 	ome good hints about this can be found in strace:
+// 	one good hints about this can be found in strace:
 //
 //	https://github.com/bnoordhuis/strace/blob/master/syscall.c#L1250
 
