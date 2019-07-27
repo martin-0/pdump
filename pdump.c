@@ -532,7 +532,7 @@ void usage() {
 		"\nusage: pdump -f /path/to/executable [-q] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
 		"\t-f\tBinary to execute.\n\n"
 		"\t-d\tDump the address to a custom file.\n\n"
-		"\t-t\tExecutable is statically linked. This option changes default dump register to %s\n\n"
+		"\t-t\tExecutable is statically linked. This option changes default dump register to %s.\n\n"
 		"\t-a\tStart dumping from custom address. If used -r, -m, -t are ignored.\n\n"
 		"\t-s\tDump size (in hexadecimal).\n\n"
 		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default mask is 0x%lx. reg & mask = dump start address.\n\n"
