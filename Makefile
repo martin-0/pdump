@@ -1,4 +1,4 @@
-CFLAGS=-g 
+CFLAGS=-g -Wall -pedantic 
 
 OUTDIR=work
 PDUMP=pdump
