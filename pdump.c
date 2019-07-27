@@ -16,7 +16,7 @@
 
 #include "pdump.h"
 
-#define DEBUG	1
+#define	VERSION	"0.4"
 
 int main(int argc, char** argv) {
 	struct opts_t opts;
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
 		ofst_to_brk_in = regs.eip - 2 - addr_start;		// -2 to compensate for either syscall or int 0x80
 	#endif
 
-	fprintf(stderr, "+pdump: %u: start address: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_start, ofst_to_brk_in);
+	fprintf(stdout, "+pdump: %u: start address: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_start, ofst_to_brk_in);
 
 	// we don't care about the child any more.. 
 	PTRACE_DETACH(pid)
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
 	addr_start = get_to_entry(&regs, pid, &status, &opts);
 	addr_brk_in = addr_start + ofst_to_brk_in;		// in case of static binary ofst_to_brk_in is the actual address (-addr_start was done during first run)
 
-	fprintf (stderr, "+pdump: %u: addr start: 0x%lx, addr brk: 0x%lx\n", pid, addr_start, addr_brk_in);
+	fprintf (stdout, "+pdump: %u: addr start: 0x%lx, addr brk: 0x%lx\n", pid, addr_start, addr_brk_in);
 
 	// trace until the brk() syscall instruction
 	if ((trace_until(&regs, addr_brk_in, pid, &status)) != 0) {
@@ -122,10 +122,10 @@ int main(int argc, char** argv) {
 		#endif
 	}
 
-	fprintf(stderr,"+pdump: %u: dump address: 0x%lx\n", pid, addr_dump_base);
+	fprintf(stdout, "+pdump: %u: dump address: 0x%lx\n", pid, addr_dump_base);
 
 	if (opts.verbose) { 
-		fprintf(stderr, "\n+pdump: %u: registers just before syscall:\n", pid);
+		fprintf(stdout, "\n+pdump: %u: registers just before syscall:\n", pid);
 		regdump(&regs);
 	}
 
@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
 
 	close(dfd);
 
-	printf ("pdump: done.\n");
+	fprintf (stdout, "pdump: done.\n");
         return 0;
 }
 
@@ -186,17 +186,13 @@ long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status, struct 
 			if (WSTOPSIG(*status) == SIGTRAP) {
 				PTRACE_GETREGS(pid, regs);
 
-				printf ("got_entry cs: %llx, rax: %llx, catching: %lx\n", regs->cs, regs->orig_rax, sysnr_execve);
-
 				// detect 32b process
 				if (regs->cs == REG_CS_x32 || regs->cs == REG_CS_32_COMPAT) {
-					printf ("32b process!\n");
 					sysnr_execve = SYS32_execve;
 					o->is_32b = 1;
 		
-					fprintf(stderr, "DEBUG: get_to_entry: 32b process detected.\n");
+					fprintf(stdout, "+pdump: %u: get_to_entry: 32b process detected.\n", pid);
 				}
-
 				if (regs->orig_rax == sysnr_execve) {
 					// we are done
 					if (intosys) 
@@ -229,7 +225,11 @@ long get_to_entry(struct user_regs_struct* regs, pid_t pid, int* status, struct 
 }
 
 int catch_syscall(struct user_regs_struct* regs, int* status, pid_t pid, long sysnr, int* intosys) {
-	unsigned long curnr, ret;
+	unsigned long curnr;
+
+	#ifdef DEBUG
+		unsigned long ret;
+	#endif
 
 	wait(status);
 	assert_status(status, pid);
@@ -243,10 +243,14 @@ int catch_syscall(struct user_regs_struct* regs, int* status, pid_t pid, long sy
 
 		#ifdef __x86_64__
 			curnr = regs->orig_rax;
-			ret = regs->rax;
+			#ifdef DEBUG
+				ret = regs->rax;
+			#endif
 		#else
 			curnr = regs->orig_eax;
-			ret = regs->eax;
+			#ifdef DEBUG
+				ret = regs->eax;
+			#endif
 		#endif
 
 		#if DEBUG > 1
@@ -264,8 +268,6 @@ int catch_syscall(struct user_regs_struct* regs, int* status, pid_t pid, long sy
 			*intosys = 1;
 		 }
 	}
-
-	printf ("catch_syscall wait");
 
 	PTRACE_SYSCALL(pid)
 
@@ -300,14 +302,16 @@ void assert_status(int* status, pid_t pid) {
 
 void handle_child(char* tracee) {
 	/* child */
+	pid_t chpid = getpid();
+
 	if ( (ptrace(PTRACE_TRACEME, 0, 0, 0)) == 0) {
-		kill(getpid(), SIGSTOP);
+		kill(chpid, SIGSTOP);
 
 		execl(tracee, tracee, NULL);
-		fprintf (stderr, "oops: execl() failed ..\n");
+		fprintf (stderr, "PID %u: oops: execl() failed ..\n", chpid);
 	}
 	else {
-		fprintf (stderr, "oops: ptrace() failed ..\n");
+		fprintf (stderr, "PID %u: oops: ptrace() failed ..\n", chpid);
 	}
 	exit(2);
 }
@@ -333,7 +337,7 @@ int trace_until(struct user_regs_struct* regs, unsigned long ip, pid_t pid, int*
 
 void regdump(struct user_regs_struct* r) {
 	#ifdef __x86_64__
-		fprintf (stderr,"rax\t\t0x%llx\nrbx\t\t0x%llx\nrcx\t\t0x%llx\nrdx\t\t0x%llx\n"
+		fprintf (stdout,"rax\t\t0x%llx\nrbx\t\t0x%llx\nrcx\t\t0x%llx\nrdx\t\t0x%llx\n"
 				"rsi\t\t0x%llx\nrdi\t\t0x%llx\nrbp\t\t0x%llx\nrsp\t\t0x%llx\n"
 				"r8\t\t0x%llx\nr9\t\t0x%llx\nr10\t\t0x%llx\nr11\t\t0x%llx\n"
 				"r12\t\t0x%llx\nr13\t\t0x%llx\nr14\t\t0x%llx\nr15\t\t0x%llx\nrip\t\t0x%llx\n\n", 
@@ -341,7 +345,7 @@ void regdump(struct user_regs_struct* r) {
 				r->r9, r->r10, r->r11, r->r12, r->r13, r->r14, r->r15, r->rip);
 
 	#else
-		fprintf (stderr,"eax\t\t0x%lx\necx\t\t0x%lx\nedx\t\t0x%lx\nebx\t\t0x%lx\n"
+		fprintf (stdout,"eax\t\t0x%lx\necx\t\t0x%lx\nedx\t\t0x%lx\nebx\t\t0x%lx\n"
 				"esp\t\t0x%lx\nebp\t\t0x%lx\nesi\t\t0x%lx\nedi\t\t0x%lx\neip\t\t0x%lx\n\n",
 				r->eax, r->ecx, r->edx, r->ebx, r->esp, r->ebp, r->esi, r->edi, r->eip);
 	#endif
@@ -387,8 +391,8 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 					optarg[i] = tolower(optarg[i]);
 				}
 
+				// not exactly an eye candy.. 
 				#ifdef __x86_64__
-					// not exactly an eye candy.. 
 					if (strncmp(optarg, "rax", 3) == 0) {
 						o->reg = reg_rax;
 					}
@@ -445,7 +449,6 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 						usage();
 					}
 				#else
-					// not exactly an eye candy..
 					if (strncmp(optarg, "eax", 3) == 0) {
 						o->reg = reg_eax;
 					}
@@ -524,7 +527,6 @@ void fancy_print(struct opts_t* o) {
 
 // XXX: better merge of these functions 
 
-#ifdef __x86_64__
 void usage() {
         printf(
 		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
@@ -541,7 +543,7 @@ void usage() {
 
 	exit(1);
 }
-#else
+/*
 void usage() {
 	printf(
 		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
@@ -558,5 +560,4 @@ void usage() {
 
 	exit(1);
 }
-
-#endif
+*/

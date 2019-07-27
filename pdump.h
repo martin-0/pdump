@@ -84,12 +84,13 @@ struct regentry_t  reg_lookup_tbl[] = {
 };
 
 #define	DEFAULT_BASEREG			( reg_rbp )
-#define	DEFAULT_MASK			0xfffffffffffff000
+#define	DEFAULT_MASK			0xfffffffffffff000L
 
 // XXX: maybe I should use PTRACE_GETREGSET 
-// some good hints can be found in strace:
-//	https://github.com/bnoordhuis/strace/blob/master/syscall.c#L1250
+// 	ome good hints about this can be found in strace:
 //
+//	https://github.com/bnoordhuis/strace/blob/master/syscall.c#L1250
+
 // use these to detect the trace mode
 #define	REG_CS_64			0x33
 #define	REG_CS_x32			0x2bULL		// x32 mode (x86-64 in 32b)
@@ -110,7 +111,7 @@ struct regentry_t  reg_lookup_tbl[] = {
 };
 
 #define	DEFAULT_BASEREG			( reg_ebp )
-#define	DEFAULT_MASK			0xfffff000
+#define	DEFAULT_MASK			0xfffff000L
 #endif	/* ifdef __x86_64__*/
 
 
