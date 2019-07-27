@@ -60,7 +60,7 @@ struct opts_t {
 	unsigned long d_addr;		// custom dump address
         unsigned long mask;		// preferred mask
         int reg;			// register that holds .text address before brk()
-	int verbose;			// verbose toggle
+	int quiet;			// surpress messages
 	int is_static;			// indicates we are working on static binary
 	int is_32b;			// tracee is 32b 
 };
@@ -84,6 +84,7 @@ struct regentry_t  reg_lookup_tbl[] = {
 };
 
 #define	DEFAULT_BASEREG			( reg_rbp )
+#define	DEFAULT_BASEREG_STATIC		( reg_rdx )
 #define	DEFAULT_MASK			0xfffffffffffff000L
 
 // XXX: maybe I should use PTRACE_GETREGSET 
@@ -111,6 +112,7 @@ struct regentry_t  reg_lookup_tbl[] = {
 };
 
 #define	DEFAULT_BASEREG			( reg_ebp )
+#define	DEFAULT_BASEREG_STATIC		( reg_edx )
 #define	DEFAULT_MASK			0xfffff000L
 #endif	/* ifdef __x86_64__*/
 

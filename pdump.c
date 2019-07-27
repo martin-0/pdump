@@ -23,8 +23,8 @@ int main(int argc, char** argv) {
 
 	// set the options first
 	handle_args(&opts, argc, argv);
-	opts.verbose = 1;
-	if (opts.verbose) {
+
+	if (!opts.quiet) {
 		fancy_print(&opts);
 	}
 
@@ -74,7 +74,8 @@ int main(int argc, char** argv) {
 		ofst_to_brk_in = regs.eip - 2 - addr_start;		// -2 to compensate for either syscall or int 0x80
 	#endif
 
-	fprintf(stdout, "+pdump: %u: start address: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_start, ofst_to_brk_in);
+	if (opts.quiet < 2)
+		fprintf(stdout, "+pdump: %u: start address: 0x%.lx, offset to brk: 0x%lx\n\n", pid, addr_start, ofst_to_brk_in);
 
 	// we don't care about the child any more.. 
 	PTRACE_DETACH(pid)
@@ -97,7 +98,8 @@ int main(int argc, char** argv) {
 	addr_start = get_to_entry(&regs, pid, &status, &opts);
 	addr_brk_in = addr_start + ofst_to_brk_in;		// in case of static binary ofst_to_brk_in is the actual address (-addr_start was done during first run)
 
-	fprintf (stdout, "+pdump: %u: addr start: 0x%lx, addr brk: 0x%lx\n", pid, addr_start, addr_brk_in);
+	if (!opts.quiet) 
+		fprintf (stdout, "+pdump: %u: addr start: 0x%lx, addr brk: 0x%lx\n", pid, addr_start, addr_brk_in);
 
 	// trace until the brk() syscall instruction
 	if ((trace_until(&regs, addr_brk_in, pid, &status)) != 0) {
@@ -122,9 +124,11 @@ int main(int argc, char** argv) {
 		#endif
 	}
 
-	fprintf(stdout, "+pdump: %u: dump address: 0x%lx\n", pid, addr_dump_base);
+	if (opts.quiet < 2)
+		fprintf(stdout, "+pdump: %u: dump address: 0x%lx\n", pid, addr_dump_base);
+	
 
-	if (opts.verbose) { 
+	if (!opts.quiet) { 
 		fprintf(stdout, "\n+pdump: %u: registers just before syscall:\n", pid);
 		regdump(&regs);
 	}
@@ -154,7 +158,9 @@ int main(int argc, char** argv) {
 
 	close(dfd);
 
-	fprintf (stdout, "pdump: done.\n");
+	if (!opts.quiet) 
+		fprintf (stdout, "pdump: done.\n");
+
         return 0;
 }
 
@@ -361,11 +367,11 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 	o->d_addr = 0;
 	o->mask = DEFAULT_MASK;
 	o->reg = DEFAULT_BASEREG;
-	o->verbose = 0;
+	o->quiet = 0;
 	o->is_static = 0;
 	o->is_32b = 0;
 
-	while ((opt = getopt(argc, argv, "f:d:s:ta:m:r:vh?")) != -1 ) {
+	while ((opt = getopt(argc, argv, "f:d:s:ta:m:r:qh?")) != -1 ) {
 		switch(opt) {
 		case 'f':	o->chldpath = optarg;
 				break;
@@ -483,7 +489,7 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 				#endif
 				break;
 
-		case 'v':	o->verbose++;
+		case 'q':	o->quiet++;
 				break;
 		case 'h':
 		case '?':	
@@ -499,11 +505,7 @@ int handle_args(struct opts_t* o, int argc, char** argv) {
 	}
 
 	if (o->is_static) {
-		#ifdef __x86_64__
-			o->reg = reg_rdx;	
-		#else
-			o->reg = reg_edx;
-		#endif
+		o->reg = DEFAULT_BASEREG_STATIC;
 	}
 
 	return 0;
@@ -525,39 +527,26 @@ void fancy_print(struct opts_t* o) {
 	}
 }
 
-// XXX: better merge of these functions 
-
 void usage() {
         printf(
-		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
+		"\nusage: pdump -f /path/to/executable [-q] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
 		"\t-f\tBinary to execute.\n\n"
 		"\t-d\tDump the address to a custom file.\n\n"
-		"\t-t\tExecutable is statically linked. This option changes default dump register to rdx.\n\n"
+		"\t-t\tExecutable is statically linked. This option changes default dump register to %s\n\n"
 		"\t-a\tStart dumping from custom address. If used -r, -m, -t are ignored.\n\n"
 		"\t-s\tDump size (in hexadecimal).\n\n"
-		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default address is 0x%lx. reg & mask = dump start address.\n\n"
-		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"
-		"\t\tSupported register names: rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15, rip\n\n"
-		"\t-v\tToggle verbose mode.\n\n"
-		"\t-? -h\tThis help.\n\n", DEFAULT_MASK);
+		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default mask is 0x%lx. reg & mask = dump start address.\n\n"
+		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register.\n\n"
 
-	exit(1);
-}
-/*
-void usage() {
-	printf(
-		"\nusage: pdump -f /path/to/executable [-v] [-d /path/to/dump] [-s size] {-a} [-t] [-r register] [-m mask]\n\n"
-		"\t-f\tBinary to execute.\n\n"
-		"\t-l\tPath to a loader (ld.so).\n\n"
-		"\t-d\tDump the address to a custom file.\n\n"
-		"\t-a\tStart dumping from custom address. If used -r, -m, -t are ignored.\n\n"
-		"\t-s\tDump size (in hexadecimal).\n\n"
-		"\t-m\tCustom mask.\n\t\tRegister that is used as a dump starting point is and-ed with the mask. Default address is 0x%x. reg & mask = dump start address.\n\n"
-		"\t-r\tSpecify register to start dumping from.\n\t\tDepending on the gcc .text address could be in different register. In recent ld versions it's the ebp register.\n\n"
+		#ifdef __x86_64__
+			"\t\tSupported register names for 64b: rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15, rip\n"
+			"\t\tSupported register names for 32b: eax, ebx, ecx, edx, esi, edi, ebp, eip\n\n"
+		#else 
 			"\t\tSupported register names: eax, ebx, ecx, edx, esi, edi, ebp, eip\n\n"
-		"\t-v\tToggle verbose mode.\n\n"
-		"\t-? -h\tThis help.\n\n", DEFAULT_MASK);
+		#endif
+
+		"\t-q\tToggle quiet mode. Multiple -q supress more messages. Current limit is 2.\n\n"
+		"\t-? -h\tThis help.\n\n", reg_lookup_tbl[DEFAULT_BASEREG_STATIC].name, DEFAULT_MASK);
 
 	exit(1);
 }
-*/
